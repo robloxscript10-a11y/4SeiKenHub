@@ -1,6 +1,6 @@
 -- 4SeiKen Full (Rayfield + ESP Head + Cooldown Auto + Auto Block + Aimbot + AutoPunch + Inf Stamina)
--- Không hardcode tên skill: tự bắt từ RemoteEvent (UseActorAbility / UpdateAbilityCooldown ...)
--- Lưu ý: Auto Block/Punch cần game đúng Remote; script đã scan & đoán tên phổ biến, bạn có thể sửa nhanh trong phần "REMOTE GUESSES".
+-- Không hardcode tên skill: tự bắt từ RemoteEvent (UseActorAbility / UpdateAbilityCooldown...)
+-- Auto Block/Punch cố gắng đoán tên Remote. Có thể sửa nhanh phần "REMOTE GUESSES".
 
 if getgenv().SeikenFull then
     warn("4SeiKen đã chạy.")
@@ -16,8 +16,31 @@ local UserInputService   = game:GetService("UserInputService")
 local Camera             = workspace.CurrentCamera
 local LocalPlayer        = Players.LocalPlayer
 
+-- Sửa lỗi unpack trên Luau
+local unpack = table.unpack or unpack
+
 --// Rayfield GUI
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local Rayfield
+do
+    local ok, lib = pcall(function()
+        return loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+    end)
+    if not ok or type(lib) ~= "table" then
+        warn("[4SeiKen] Không tải được Rayfield, tiếp tục chạy headless.")
+        Rayfield = {
+            CreateWindow = function() return {
+                CreateTab = function() return {
+                    CreateToggle = function() end,
+                    CreateParagraph = function() end,
+                } end
+            } end,
+            Notify = function() end
+        }
+    else
+        Rayfield = lib
+    end
+end
+
 local Window = Rayfield:CreateWindow({
     Name = "4SeiKen | Forsaken Helper",
     LoadingTitle = "4SeiKen",
@@ -36,11 +59,11 @@ local autoBlock       = false
 local autoPunch       = false
 local infStamina      = false
 
---// Cooldown store: per player -> per skill -> timeLeft (sec)
+--// Cooldown store
 local ActiveCooldowns = {}  -- [userId] = { [skillName] = seconds }
-local LastSeenSkill   = {}  -- [userId] = ordered list of skill names to render ổn định
+local LastSeenSkill   = {}  -- [userId] = ordered skill list
 
---// Fallback cooldown (nếu event UseActorAbility không gửi số giây). Bạn chỉnh nếu cần.
+-- Fallback cooldown
 local DefaultCooldowns = {
     Ghostburger=25, SlateskinPotion=55, InvisibilityCloak=30,
     ThrowPizza=30, RushHour=25, Sentry=35, Dispenser=35,
@@ -70,7 +93,9 @@ local PunchRemote = findRemoteByNames({"Punch","Melee","Attack","Hit","PunchRemo
 local function safeFire(remote, ...)
     if typeof(remote) == "Instance" then
         local ok,_ = pcall(function()
-            if remote.FireServer then remote:FireServer(...) elseif remote.InvokeServer then remote:InvokeServer(...) end
+            if remote.FireServer then remote:FireServer(...)
+            elseif remote.InvokeServer then remote:InvokeServer(...)
+            end
         end)
         return ok
     end
@@ -153,11 +178,9 @@ local function updateBillboard(plr)
 
     local uid = plr.UserId
     local lines = {}
-    -- in ra theo thứ tự lần đầu thấy skill để đỡ nhảy
     LastSeenSkill[uid] = LastSeenSkill[uid] or {}
     local order = LastSeenSkill[uid]
 
-    -- Gom tên xuất hiện lần đầu
     for skill,_ in pairs(ActiveCooldowns[uid] or {}) do
         local seen = false
         for _,s in ipairs(order) do if s == skill then seen = true break end end
@@ -172,32 +195,26 @@ local function updateBillboard(plr)
             table.insert(lines, ("%s: Ready"):format(skill))
         end
     end
-
     cd.Text = table.concat(lines, "\n")
 end
 
 local function trackPlayer(plr)
-    plr.CharacterAdded:Connect(function(char)
+    plr.CharacterAdded:Connect(function()
         task.wait(0.4)
         getOrCreateBillboard(plr)
     end)
-    if plr.Character then
-        getOrCreateBillboard(plr)
-    end
+    if plr.Character then getOrCreateBillboard(plr) end
 end
 
-for _,p in ipairs(Players:GetPlayers()) do
-    if p ~= LocalPlayer then trackPlayer(p) end
-end
+for _,p in ipairs(Players:GetPlayers()) do if p ~= LocalPlayer then trackPlayer(p) end end
 Players.PlayerAdded:Connect(function(p) if p ~= LocalPlayer then trackPlayer(p) end end)
 
---// Tick cooldowns & refresh ESP text
+-- Tick cooldowns & refresh
 task.spawn(function()
     local acc = 0
     while true do
         local dt = task.wait(0.1)
         acc += dt
-        -- giảm cooldown mỗi 0.1s cho mượt
         for uid, skills in pairs(ActiveCooldowns) do
             for name, t in pairs(skills) do
                 if t and t > 0 then
@@ -205,7 +222,6 @@ task.spawn(function()
                 end
             end
         end
-        -- refresh text xấp xỉ mỗi 0.2s
         if acc >= 0.2 then
             acc = 0
             for _,plr in ipairs(Players:GetPlayers()) do
@@ -215,7 +231,7 @@ task.spawn(function()
     end
 end)
 
---// Helper: tìm Player từ arg
+-- Helper: tìm Player từ arg
 local function resolvePlayerFromArg(v)
     if typeof(v) == "Instance" then
         if v:IsA("Player") then return v end
@@ -237,19 +253,14 @@ local function resolvePlayerFromArg(v)
     return nil
 end
 
---// Helper: rút skillName & duration & actor từ list args
+-- Parse event để lấy actor/skill/duration
 local function parseAbilityEvent(remote, args)
     local raw = {}
     for i=1, select("#", unpack(args)) do
         raw[i] = args[i]
     end
 
-    -- loại các token phổ biến để tìm tên chiêu
-    local blacklist = {
-        "UseActorAbility","UseAbility","UpdateAbilityCooldown",
-        "AbilityCooldown","Cooldown","SetCooldown","Skill","Ability"
-    }
-
+    local blacklist = {"UseActorAbility","UseAbility","UpdateAbilityCooldown","AbilityCooldown","Cooldown","SetCooldown","Skill","Ability"}
     local function isBlacklisted(s)
         local low = string.lower(s)
         for _,k in ipairs(blacklist) do
@@ -258,46 +269,32 @@ local function parseAbilityEvent(remote, args)
         return false
     end
 
-    local actorPlr
-    local skillName
-    local duration
+    local actorPlr, skillName, duration
 
-    -- ưu tiên tách actor
     for _,v in ipairs(raw) do
         local p = resolvePlayerFromArg(v)
         if p then actorPlr = p break end
     end
 
-    -- bắt duration
     for _,v in ipairs(raw) do
         if typeof(v) == "number" then
-            duration = v -- nhớ giá trị số cuối cùng (thường là giây CD)
+            duration = v
         elseif typeof(v) == "table" then
-            -- nếu table có field Cooldown/Duration
             local ok,val = pcall(function() return v.Cooldown or v.Duration or v.cd or v.time end)
             if ok and typeof(val) == "number" then duration = val end
         end
     end
 
-    -- bắt skill name: string đầu tiên hợp lệ (không nằm trong blacklist)
     for _,v in ipairs(raw) do
-        if typeof(v) == "string" then
-            local s = v
-            if not isBlacklisted(s) and #s <= 28 then -- tránh string dài rác
-                skillName = s
-                break
-            end
+        if typeof(v) == "string" and not isBlacklisted(v) and #v <= 28 then
+            skillName = v
+            break
         end
     end
 
-    -- fallback actor
     if not actorPlr then actorPlr = LocalPlayer end
-    -- fallback skillName = tên remote (nếu rơi vào TH hiếm)
     if not skillName then skillName = tostring(remote.Name) end
-    -- fallback duration
-    if not duration then
-        duration = DefaultCooldowns[skillName] or 10
-    end
+    if not duration then duration = DefaultCooldowns[skillName] or 10 end
 
     return actorPlr, skillName, duration
 end
@@ -307,23 +304,18 @@ local function startCooldown(plr, skillName, secs)
     ActiveCooldowns[plr.UserId] = ActiveCooldowns[plr.UserId] or {}
     ActiveCooldowns[plr.UserId][skillName] = tonumber(secs) or 0
 
-    -- nhớ thứ tự hiển thị
     LastSeenSkill[plr.UserId] = LastSeenSkill[plr.UserId] or {}
     local order = LastSeenSkill[plr.UserId]
     local seen = false
     for _,s in ipairs(order) do if s == skillName then seen = true break end end
     if not seen then table.insert(order, skillName) end
 
-    -- auto block nếu đang bật
     if autoBlock and plr ~= LocalPlayer then
-        -- nếu đối thủ vừa dùng skill, block nhanh một nhịp
-        for i=1,4 do
-            safeFire(BlockRemote, true)
-        end
+        for _=1,4 do safeFire(BlockRemote, true) end
     end
 end
 
---// Kết nối tất cả RemoteEvent và theo dõi
+-- Kết nối remotes
 local connected = setmetatable({}, {__mode = "k"})
 local keywords  = {"UseActorAbility","UseAbility","UpdateAbilityCooldown","AbilityCooldown","Cooldown","SetCooldown"}
 
@@ -332,12 +324,9 @@ local function connectRemoteEvent(ev)
     connected[ev] = true
     ev.OnClientEvent:Connect(function(...)
         local args = {...}
-        -- lọc nhanh theo từ khóa trong args hoặc theo tên remote
         local hit = false
         local rn = string.lower(ev.Name)
-        for _,k in ipairs(keywords) do
-            if rn:find(string.lower(k)) then hit = true break end
-        end
+        for _,k in ipairs(keywords) do if rn:find(string.lower(k)) then hit = true break end end
         if not hit then
             for _,v in ipairs(args) do
                 if typeof(v) == "string" then
@@ -357,9 +346,7 @@ end
 
 local function scanAllRemotes()
     for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
-        if obj:IsA("RemoteEvent") then
-            connectRemoteEvent(obj)
-        end
+        if obj:IsA("RemoteEvent") then connectRemoteEvent(obj) end
     end
 end
 scanAllRemotes()
@@ -367,12 +354,12 @@ ReplicatedStorage.DescendantAdded:Connect(function(obj)
     if obj:IsA("RemoteEvent") then connectRemoteEvent(obj) end
 end)
 
---// ===== Aimbot (đơn giản: khóa nearest khác mình) =====
+-- Aimbot
 RunService.RenderStepped:Connect(function()
     if not aimbotEnabled then return end
     local myChar = LocalPlayer.Character
     local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
-    if not (myHRP) then return end
+    if not myHRP then return end
 
     local best, bestDist
     for _,plr in ipairs(Players:GetPlayers()) do
@@ -380,8 +367,7 @@ RunService.RenderStepped:Connect(function()
             local head = plr.Character.Head
             local dist = (head.Position - Camera.CFrame.Position).Magnitude
             if not bestDist or dist < bestDist then
-                bestDist = dist
-                best = head
+                bestDist = dist; best = head
             end
         end
     end
@@ -390,7 +376,7 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
---// ===== Auto Punch =====
+-- Auto Punch
 task.spawn(function()
     while true do
         task.wait(0.25)
@@ -403,7 +389,7 @@ task.spawn(function()
     end
 end)
 
---// ===== Inf Stamina (best-effort) =====
+-- Inf Stamina (best-effort)
 local function tryInfStamina()
     local stats = LocalPlayer:FindFirstChild("Stats") or LocalPlayer:FindFirstChild("Leaderstats") or LocalPlayer:FindFirstChild("PlayerStats")
     local function boost(obj)
@@ -424,13 +410,12 @@ local function tryInfStamina()
 end
 tryInfStamina()
 
---// ===== GUI Controls =====
+-- GUI
 TabVis:CreateToggle({
     Name = "ESP Head (Tên / HP / Cooldown)",
     CurrentValue = false,
     Callback = function(v)
         espEnabled = v
-        -- refresh ngay
         for _,plr in ipairs(Players:GetPlayers()) do
             if plr ~= LocalPlayer then updateBillboard(plr) end
         end
@@ -471,10 +456,8 @@ TabMisc:CreateToggle({
     Callback = function(v) infStamina = v end
 })
 
--- Theme quick picks
 TabMisc:CreateParagraph({Title="Theme", Content="Rayfield có sẵn nhiều theme. Vào Settings → Theme để đổi màu nhanh."})
 
--- Tạo billboard lúc đầu
 for _,plr in ipairs(Players:GetPlayers()) do
     if plr ~= LocalPlayer then getOrCreateBillboard(plr) end
 end
