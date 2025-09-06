@@ -1,81 +1,85 @@
--- // Rayfield Loader
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+-- 4SeiKen Hub
+-- Full script with Rayfield UI, Auto Block, ESP, Themes
 
--- // Window
+-- // Load Rayfield UI
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
+
 local Window = Rayfield:CreateWindow({
-    Name = "4SeiKen Hub",
-    LoadingTitle = "4SeiKen Hub",
-    LoadingSubtitle = "by robloxscript10-a11y",
-    ConfigurationSaving = {
-        Enabled = true,
-        FolderName = "4SeiKenHub",
-        FileName = "Config"
-    },
-    Discord = {
-        Enabled = false
-    },
-    KeySystem = false
+   Name = "4SeiKen Hub",
+   LoadingTitle = "4SeiKen Hub Loading...",
+   LoadingSubtitle = "by robloxscript10-a11y",
+   ConfigurationSaving = {
+      Enabled = true,
+      FolderName = "4SeiKenHub",
+      FileName = "Config"
+   },
+   Discord = {
+      Enabled = false,
+      Invite = "",
+      RememberJoins = false
+   },
+   KeySystem = false,
 })
 
--- // Tabs
-local MainTab = Window:CreateTab("Main", 4483362458)
-local AutoBlockTab = Window:CreateTab("Auto Block", 4483362458)
+-- // Themes
+local themes = {
+    Default = Color3.fromRGB(255, 0, 0),
+    Blue = Color3.fromRGB(0, 170, 255),
+    Green = Color3.fromRGB(0, 255, 100),
+    Purple = Color3.fromRGB(170, 0, 255),
+    Orange = Color3.fromRGB(255, 140, 0),
+    Pink = Color3.fromRGB(255, 105, 180),
+    Yellow = Color3.fromRGB(255, 255, 0),
+    White = Color3.fromRGB(255, 255, 255),
+}
 
--- // Auto Block Toggle
-local AutoBlockEnabled = false
-local DetectionRange = 15
-
-local Toggle = AutoBlockTab:CreateToggle({
-    Name = "Enable Auto Block",
-    CurrentValue = false,
-    Flag = "AutoBlock",
-    Callback = function(Value)
-        AutoBlockEnabled = Value
-    end,
+local ThemeTab = Window:CreateTab("Themes", 4483362458)
+ThemeTab:CreateDropdown({
+   Name = "Select Theme",
+   Options = {"Default", "Blue", "Green", "Purple", "Orange", "Pink", "Yellow", "White"},
+   CurrentOption = "Default",
+   Callback = function(option)
+      Rayfield:Notify({Title="Theme", Content="Theme changed to "..option, Duration=3})
+      Rayfield:ChangeColor(themes[option])
+   end,
 })
 
-local Slider = AutoBlockTab:CreateSlider({
-    Name = "Detection Range",
-    Range = {5, 30},
-    Increment = 1,
-    Suffix = " studs",
-    CurrentValue = 15,
-    Flag = "Range",
-    Callback = function(Value)
-        DetectionRange = Value
-    end,
+-- // Auto Block Script
+local CombatTab = Window:CreateTab("Combat", 4483362458)
+CombatTab:CreateButton({
+   Name = "Enable Auto Block",
+   Callback = function()
+      loadstring(game:HttpGet("https://raw.githubusercontent.com/skibidi399/Auto-block-script/refs/heads/main/FINAL%20AUTO%20BLOCK"))()
+      Rayfield:Notify({Title="Auto Block", Content="Auto Block Loaded!", Duration=3})
+   end
 })
 
--- // Auto Block Logic
-task.spawn(function()
-    while task.wait(0.1) do
-        if AutoBlockEnabled then
-            pcall(function()
-                local Players = game:GetService("Players")
-                local LocalPlayer = Players.LocalPlayer
-                local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-                local HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart")
+-- // ESP
+local VisualTab = Window:CreateTab("Visuals", 4483362458)
+VisualTab:CreateToggle({
+   Name = "ESP",
+   CurrentValue = false,
+   Callback = function(Value)
+      if Value then
+         local ESP = loadstring(game:HttpGet("https://raw.githubusercontent.com/zntly/highlight-esp/main/main.lua"))()
+         Rayfield:Notify({Title="ESP", Content="ESP Enabled!", Duration=3})
+      else
+         Rayfield:Notify({Title="ESP", Content="ESP Disabled (rejoin to remove)", Duration=3})
+      end
+   end,
+})
 
-                for _,v in pairs(Players:GetPlayers()) do
-                    if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("HumanoidRootPart") then
-                        local mag = (HumanoidRootPart.Position - v.Character.HumanoidRootPart.Position).Magnitude
-                        if mag <= DetectionRange then
-                            -- Gọi block (ví dụ animation)
-                            game:GetService("VirtualInputManager"):SendKeyEvent(true, "F", false, game)
-                            task.wait(0.2)
-                            game:GetService("VirtualInputManager"):SendKeyEvent(false, "F", false, game)
-                        end
-                    end
-                end
-            end)
-        end
-    end
-end)
-
--- // Main Tab Example
-MainTab:CreateButton({
-    Name = "Test Print",
-    Callback = function()
-        print("Hello from 4SeiKenHub!")
-    end,
+-- // Misc
+local MiscTab = Window:CreateTab("Misc", 4483362458)
+MiscTab:CreateButton({
+   Name = "Rejoin Game",
+   Callback = function()
+      game:GetService("TeleportService"):Teleport(game.PlaceId, game.Players.LocalPlayer)
+   end
+})
+MiscTab:CreateButton({
+   Name = "Reset Character",
+   Callback = function()
+      game.Players.LocalPlayer.Character:BreakJoints()
+   end
 })
